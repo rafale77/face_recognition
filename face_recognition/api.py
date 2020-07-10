@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 
-import PIL.Image
 import dlib
-import numpy as np
-from PIL import ImageFile
+import cv2
+import cupy as np
+
 
 try:
     import face_recognition_models
@@ -11,8 +11,6 @@ except Exception:
     print("Please install `face_recognition_models` with this command before using `face_recognition`:\n")
     print("pip install git+https://github.com/ageitgey/face_recognition_models")
     quit()
-
-ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 face_detector = dlib.get_frontal_face_detector()
 
@@ -27,6 +25,14 @@ cnn_face_detector = dlib.cnn_face_detection_model_v1(cnn_face_detection_model)
 
 face_recognition_model = face_recognition_models.face_recognition_model_location()
 face_encoder = dlib.face_recognition_model_v1(face_recognition_model)
+
+dnn_face_detection_model = face_recognition_models.dnn_face_detector_model_location()
+dnn_face_detection_proto = face_recognition_models.dnn_proto_location()
+dnn_face_detector = cv2.dnn.readNetFromCaffe(dnn_face_detection_proto, dnn_face_detection_model)
+
+#switch dnn to GPU
+dnn_face_detector.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+dnn_face_detector.setPreferableTarget(cv2.dnn.DNN_TARGET_CUD)
 
 
 def _rect_to_css(rect):
@@ -83,9 +89,10 @@ def load_image_file(file, mode='RGB'):
     :param mode: format to convert the image to. Only 'RGB' (8-bit RGB, 3 channels) and 'L' (black and white) are supported.
     :return: image contents as numpy array
     """
-    im = PIL.Image.open(file)
-    if mode:
-        im = im.convert(mode)
+
+    im = cv2.imread(file)
+    if mode != "BGR":
+        im = cv2.cvtColor(im,cv2.COLOR_BGR2RGB)
     return np.array(im)
 
 
@@ -101,6 +108,21 @@ def _raw_face_locations(img, number_of_times_to_upsample=1, model="hog"):
     """
     if model == "cnn":
         return cnn_face_detector(img, number_of_times_to_upsample)
+    elif model == "dnn":
+        (h, w) = img.shape[:2]
+        blob = cv2.dnn.blobFromImage(cv2.resize(img, (300, 300)), 1.0,
+    	   (300, 300), (104.0, 177.0, 123.0), swapRB=False, crop=False)
+        # pass the blob through the network and obtain the detections and
+        # predictions
+        dnn_face_detector.setInput(blob)
+        detections = dnn_face_detector.forward()
+        #convert detections to dlib _rect
+        for i in range(0, detections.shape[2]):
+            confidence = detections[0, 0, i, 2]
+            if confidence > tolerance:
+                box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+                dlibrect[i] = dlib.rectangle(box.astype("int"))
+        return dlibrect
     else:
         return face_detector(img, number_of_times_to_upsample)
 
@@ -117,6 +139,8 @@ def face_locations(img, number_of_times_to_upsample=1, model="hog"):
     """
     if model == "cnn":
         return [_trim_css_to_bounds(_rect_to_css(face.rect), img.shape) for face in _raw_face_locations(img, number_of_times_to_upsample, "cnn")]
+    elif model == "dnn":
+        return [_trim_css_to_bounds(_rect_to_css(face.rect), img.shape) for face in _raw_face_locations(img, number_of_times_to_upsample, "dnn")]
     else:
         return [_trim_css_to_bounds(_rect_to_css(face), img.shape) for face in _raw_face_locations(img, number_of_times_to_upsample, model)]
 
@@ -157,10 +181,10 @@ def _raw_face_landmarks(face_image, face_locations=None, model="large"):
     else:
         face_locations = [_css_to_rect(face_location) for face_location in face_locations]
 
-    pose_predictor = pose_predictor_68_point
-
     if model == "small":
         pose_predictor = pose_predictor_5_point
+    else:
+        pose_predictor = pose_predictor_68_point
 
     return [pose_predictor(face_image, face_location) for face_location in face_locations]
 
@@ -200,7 +224,7 @@ def face_landmarks(face_image, face_locations=None, model="large"):
         raise ValueError("Invalid landmarks model type. Supported models are ['small', 'large'].")
 
 
-def face_encodings(face_image, known_face_locations=None, num_jitters=1, model="small"):
+def face_encodings(face_image, known_face_locations=None, num_jitters=1, model="large"):
     """
     Given an image, return the 128-dimension face encoding for each face in the image.
 

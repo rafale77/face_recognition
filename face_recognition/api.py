@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 
+import PIL.Image
 import dlib
 import cv2
-import cupy as np
 
+import cupy as cp
+import numpy as np
+
+from PIL import ImageFile
 
 try:
     import face_recognition_models
@@ -11,6 +15,8 @@ except Exception:
     print("Please install `face_recognition_models` with this command before using `face_recognition`:\n")
     print("pip install git+https://github.com/ageitgey/face_recognition_models")
     quit()
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 face_detector = dlib.get_frontal_face_detector()
 
@@ -31,8 +37,8 @@ dnn_face_detection_proto = face_recognition_models.dnn_proto_location()
 dnn_face_detector = cv2.dnn.readNetFromCaffe(dnn_face_detection_proto, dnn_face_detection_model)
 
 #switch dnn to GPU
-dnn_face_detector.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-dnn_face_detector.setPreferableTarget(cv2.dnn.DNN_TARGET_CUD)
+#dnn_face_detector.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+#dnn_face_detector.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
 
 
 def _rect_to_css(rect):
@@ -89,11 +95,13 @@ def load_image_file(file, mode='RGB'):
     :param mode: format to convert the image to. Only 'RGB' (8-bit RGB, 3 channels) and 'L' (black and white) are supported.
     :return: image contents as numpy array
     """
-
-    im = cv2.imread(file)
-    if mode != "BGR":
-        im = cv2.cvtColor(im,cv2.COLOR_BGR2RGB)
-    return np.array(im)
+    im = PIL.Image.open(file)
+    if mode == 'BGR':
+        im = cv2.cvtColor(np.array(im),cv2.COLOR_RGB2BGR)
+    else:
+        im = im.convert(mode)
+        im = np.array(im)
+    return im
 
 
 def _raw_face_locations(img, number_of_times_to_upsample=1, model="hog"):
@@ -117,15 +125,17 @@ def _raw_face_locations(img, number_of_times_to_upsample=1, model="hog"):
         dnn_face_detector.setInput(blob)
         detections = dnn_face_detector.forward()
         #convert detections to dlib _rect
+        dlibrect = []
         for i in range(0, detections.shape[2]):
             confidence = detections[0, 0, i, 2]
-            if confidence > tolerance:
+            if confidence > 0.5:
                 box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
-                dlibrect[i] = dlib.rectangle(box.astype("int"))
+                (startX, startY, endX, endY) = box.astype("int")
+                face = dlib.rectangle(startX, startY, endX, endY)
+                dlibrect.append(face)
         return dlibrect
     else:
         return face_detector(img, number_of_times_to_upsample)
-
 
 def face_locations(img, number_of_times_to_upsample=1, model="hog"):
     """
@@ -140,7 +150,7 @@ def face_locations(img, number_of_times_to_upsample=1, model="hog"):
     if model == "cnn":
         return [_trim_css_to_bounds(_rect_to_css(face.rect), img.shape) for face in _raw_face_locations(img, number_of_times_to_upsample, "cnn")]
     elif model == "dnn":
-        return [_trim_css_to_bounds(_rect_to_css(face.rect), img.shape) for face in _raw_face_locations(img, number_of_times_to_upsample, "dnn")]
+        return [_trim_css_to_bounds(_rect_to_css(face), img.shape) for face in _raw_face_locations(img, number_of_times_to_upsample, "dnn")]
     else:
         return [_trim_css_to_bounds(_rect_to_css(face), img.shape) for face in _raw_face_locations(img, number_of_times_to_upsample, model)]
 

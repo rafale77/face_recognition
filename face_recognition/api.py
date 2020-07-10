@@ -4,7 +4,6 @@ import PIL.Image
 import dlib
 import cv2
 
-import cupy as cp
 import numpy as np
 
 from PIL import ImageFile
@@ -37,8 +36,8 @@ dnn_face_detection_proto = face_recognition_models.dnn_proto_location()
 dnn_face_detector = cv2.dnn.readNetFromCaffe(dnn_face_detection_proto, dnn_face_detection_model)
 
 #switch dnn to GPU
-#dnn_face_detector.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-#dnn_face_detector.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+dnn_face_detector.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+dnn_face_detector.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
 
 
 def _rect_to_css(rect):
